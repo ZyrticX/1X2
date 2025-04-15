@@ -1,7 +1,7 @@
 /** @type {import('next').NextConfig} */
 const nextConfig = {
-  // הגדרת תיקיית הפלט ל-.next (ברירת המחדל של Next.js)
-  distDir: '.next',
+  // הגדרת תיקיית הפלט ל-build במקום .next
+  distDir: 'build',
   // הגדרות נוספות
   reactStrictMode: true,
   swcMinify: true,
