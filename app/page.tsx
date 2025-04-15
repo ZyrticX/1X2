@@ -686,8 +686,8 @@ export default function Home() {
           const { data: existingPrediction, error: checkError } = await supabase
             .from("predictions")
             .select("*")
-            .eq("game_id", gameId)
-            .eq("user_id", userIdentifier)
+            .eq("gameid", gameId)
+            .eq("userid", userIdentifier)
 
           if (checkError) {
             console.error("Error checking existing prediction:", checkError)
@@ -698,8 +698,7 @@ export default function Home() {
             const { error: updateError } = await supabase
               .from("predictions")
               .update({ prediction })
-              .eq("game_id", gameId)
-              .eq("user_id", userIdentifier)
+              .eq("id", existingPrediction[0].id)
 
             if (updateError) {
               console.error("Error updating prediction:", updateError)
@@ -709,9 +708,10 @@ export default function Home() {
             // יצירת ניחוש חדש
             const { error: insertError } = await supabase.from("predictions").insert([
               {
-                game_id: gameId,
-                user_id: userIdentifier,
+                gameid: gameId,
+                userid: userIdentifier,
                 prediction,
+                timestamp: new Date().toISOString(),
               },
             ])
 

@@ -1,6 +1,6 @@
 /** @type {import('next').NextConfig} */
 const nextConfig = {
-  // הגדרת תיקיית הפלט ל-build במקום .next
+  // הגדרת תיקיית הפלט ל-build
   distDir: 'build',
   // הגדרות נוספות
   reactStrictMode: true,
@@ -17,6 +17,14 @@ const nextConfig = {
   },
   // הגדרות עבור פריסה בסביבת Vercel
   output: 'standalone',
+  // הוספת הגדרות ניתוב
+  trailingSlash: false,
+  // הגדרות בסיסיות
+  basePath: '',
+  // הגדרות אסטרטגיית בנייה
+  experimental: {
+    appDir: true,
+  },
 };
 
 export default nextConfig;
