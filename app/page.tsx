@@ -21,7 +21,7 @@ const emptyWeeklyGames = {
 
 const daysOfWeek = ["sunday", "monday", "tuesday", "wednesday", "thursday", "friday", "saturday"]
 
-// טיפוס למשחק
+// עדכון הטיפוס למשחק כדי להתאים לשמות השדות במסד הנתונים
 interface Game {
   id: string
   homeTeam: string
@@ -31,8 +31,8 @@ interface Game {
   closingTime?: Date
   result?: string
   isFinished?: boolean
-  manuallyLocked?: boolean
-  islocked?: boolean
+  islocked?: boolean // שינוי מ-isLocked ל-islocked
+  manuallylocked?: boolean // שינוי מ-manuallyLocked ל-manuallylocked
 }
 
 // פונקציית עזר להמרת יום לערך מספרי לצורך השוואה
@@ -80,6 +80,31 @@ const isGameDayReached = (day: string) => {
 
   // אחרת, מאפשרים רק את משחקי היום הנוכחי
   return day === currentDay
+}
+
+// עדכון פונקציית isGameLocked כדי להשתמש בשמות השדות הנכונים
+const isGameLocked = (game: Game) => {
+  // בדיקה אם המשחק ננעל ידנית על ידי מנהל
+  if (game.manuallylocked) {
+    return true
+  }
+
+  // בדיקה אם המשחק כבר הסתיים
+  if (game.isFinished) {
+    return true
+  }
+
+  // בדיקה אם המשחק מסומן כנעול
+  if (game.islocked) {
+    return true
+  }
+
+  // בדיקה אם עבר זמן הסגירה
+  if (game.closingTime && new Date() > new Date(game.closingTime)) {
+    return true
+  }
+
+  return false
 }
 
 export default function Home() {
@@ -151,7 +176,9 @@ export default function Home() {
     }
   }, [isAuthenticated, router])
 
-  // עדכון useEffect שטוען את המשחקים
+  // מחיקת כל השימושים ב-localStorage
+
+  // הסרת הקוד הקשור ל-localStorage בטעינת משחקים
   useEffect(() => {
     const loadGamesFromDB = async () => {
       try {
@@ -418,7 +445,7 @@ export default function Home() {
     }))
   }
 
-  // פונקציה להגשת ניחוש - מעודכנת כדי לטפל בהמרת קוד שחקן ל-UUID
+  // עדכון פונקציית submitPrediction - הסרת השימוש ב-localStorage
   const submitPrediction = async (gameId: string) => {
     if (!isAuthenticated || !userIdentifier) {
       alert("יש להתחבר כדי לשלוח ניחושים")
@@ -552,29 +579,6 @@ export default function Home() {
   }
 
   // פונקציה לבדיקה אם משחק נעול
-  const isGameLocked = (game: Game) => {
-    // בדיקה אם המשחק ננעל ידנית על ידי מנהל
-    if (manuallyLockedGames[game.id]) {
-      return true
-    }
-
-    // בדיקה אם המשחק כבר הסתיים
-    if (game.isFinished) {
-      return true
-    }
-
-    // בדיקה אם המשחק מסומן כנעול
-    if (game.islocked) {
-      return true
-    }
-
-    // בדיקה אם עבר זמן הסגירה
-    if (game.closingTime && new Date() > new Date(game.closingTime)) {
-      return true
-    }
-
-    return false
-  }
 
   // פונקציה לבדיקה אם יום המשחק הגיע
   const isDayReached = (day: string) => {
@@ -685,7 +689,7 @@ export default function Home() {
                     <GameTimer
                       closingTime={game.closingTime}
                       isPastDay={isDayPassed(activeDay)}
-                      isManuallyLocked={manuallyLockedGames[game.id]}
+                      isManuallyLocked={game.manuallylocked} // שינוי מ-manuallyLockedGames[game.id] ל-game.manuallylocked
                     />
                   )}
 

@@ -34,102 +34,84 @@ async function getGameUUID(gameId: string) {
   }
 }
 
-// עדכון פונקציית submitPrediction כדי להסיר את השימוש ב-external_user_id
+// מחיקת כל השימושים ב-localStorage
 
-// במקום הקוד הקיים של פונקציית submitPrediction, החלף אותו בקוד הבא:
 export const submitPrediction = async (prediction: any): Promise<boolean> => {
   try {
-    // שמירה בלוקל סטורג' תחילה כגיבוי
-    if (typeof window !== "undefined") {
-      const predictions = JSON.parse(localStorage.getItem("predictions") || "[]")
-      predictions.push({
-        ...prediction,
-        id: Date.now().toString(),
-        timestamp: new Date(),
-      })
-      localStorage.setItem("predictions", JSON.stringify(predictions))
-      console.log("Prediction saved to localStorage")
+    // נסה לשמור ב-Supabase
+    const supabase = getSupabaseClient()
+
+    if (!supabase) {
+      console.error("Supabase is not available")
+      return false
     }
 
-    // נסה לשמור ב-Supabase
-    try {
-      const supabase = getSupabaseClient()
+    // בדוק אם המשתמש קיים לפי קוד השחקן
+    const { data: userData, error: userError } = await supabase
+      .from("users")
+      .select("id")
+      .eq("playercode", prediction.user_id)
+      .limit(1)
 
-      if (!supabase) {
-        console.error("Supabase is not available")
-        return true // מחזיר הצלחה כי שמרנו בלוקל סטורג'
+    if (userError) {
+      console.error("Error checking user:", userError)
+      return false
+    }
+
+    // אם המשתמש קיים, השתמש ב-ID שלו
+    if (userData && userData.length > 0) {
+      const userId = userData[0].id
+
+      // בדיקה אם כבר קיים ניחוש למשחק זה מהמשתמש הזה
+      const { data: existingPrediction, error: checkError } = await supabase
+        .from("predictions")
+        .select("*")
+        .eq("gameid", prediction.game_id)
+        .eq("userid", userId)
+
+      if (checkError) {
+        console.error("Error checking existing prediction:", checkError)
+        return false
       }
 
-      // בדוק אם המשתמש קיים לפי קוד השחקן
-      const { data: userData, error: userError } = await supabase
-        .from("users")
-        .select("id")
-        .eq("playercode", prediction.user_id)
-        .limit(1)
-
-      if (userError) {
-        console.error("Error checking user:", userError)
-        return true // מחזיר הצלחה כי שמרנו בלוקל סטורג'
-      }
-
-      // אם המשתמש קיים, השתמש ב-ID שלו
-      if (userData && userData.length > 0) {
-        const userId = userData[0].id
-
-        // בדיקה אם כבר קיים ניחוש למשחק זה מהמשתמש הזה
-        const { data: existingPrediction, error: checkError } = await supabase
+      if (existingPrediction && existingPrediction.length > 0) {
+        // עדכון ניחוש קיים
+        const { error: updateError } = await supabase
           .from("predictions")
-          .select("*")
-          .eq("gameid", prediction.game_id)
-          .eq("userid", userId)
+          .update({
+            prediction: prediction.prediction,
+            timestamp: new Date().toISOString(),
+          })
+          .eq("id", existingPrediction[0].id)
 
-        if (checkError) {
-          console.error("Error checking existing prediction:", checkError)
-          return true // מחזיר הצלחה כי שמרנו בלוקל סטורג'
-        }
-
-        if (existingPrediction && existingPrediction.length > 0) {
-          // עדכון ניחוש קיים
-          const { error: updateError } = await supabase
-            .from("predictions")
-            .update({
-              prediction: prediction.prediction,
-              timestamp: new Date().toISOString(),
-            })
-            .eq("id", existingPrediction[0].id)
-
-          if (updateError) {
-            console.error("Error updating prediction:", updateError)
-            return true // מחזיר הצלחה כי שמרנו בלוקל סטורג'
-          }
-        } else {
-          // שמירת הניחוש עם ה-ID של המשתמש
-          const { error: predError } = await supabase.from("predictions").insert([
-            {
-              userid: userId,
-              gameid: prediction.game_id,
-              prediction: prediction.prediction,
-              timestamp: new Date().toISOString(),
-            },
-          ])
-
-          if (predError) {
-            console.error("Error saving prediction:", predError)
-            // אם יש שגיאה, נסתפק בשמירה בלוקל סטורג'
-            return true
-          }
+        if (updateError) {
+          console.error("Error updating prediction:", updateError)
+          return false
         }
       } else {
-        // אם המשתמש לא קיים, שמור רק בלוקל סטורג'
-        console.log("User not found, prediction saved only to localStorage")
-      }
+        // שמירת הניחוש עם ה-ID של המשתמש
+        const { error: predError } = await supabase.from("predictions").insert([
+          {
+            userid: userId,
+            gameid: prediction.game_id,
+            prediction: prediction.prediction,
+            timestamp: new Date().toISOString(),
+          },
+        ])
 
-      console.log("Prediction process completed")
-      return true
-    } catch (supabaseError) {
-      console.error("Error with Supabase:", supabaseError)
-      return true // מחזיר הצלחה כי שמרנו בלוקל סטורג'
+        if (predError) {
+          console.error("Error saving prediction:", predError)
+          return false
+        }
+      }
+    } else {
+      // אם המשתמש לא קיים
+      console.log("User not found, prediction not saved")
+      return false
     }
+
+    console.log("Prediction process completed")
+    return true
   } catch (error) {
     console.error("Error submitting prediction:", error)
     return false

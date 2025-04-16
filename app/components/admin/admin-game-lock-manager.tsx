@@ -16,9 +16,6 @@ interface Game {
   manuallyLocked?: boolean
 }
 
-// נתוני דוגמה למשחקים - יוחלפו בנתונים אמיתיים מ-Supabase
-const mockGames: Game[] = []
-
 export default function AdminGameLockManager() {
   const [games, setGames] = useState<Game[]>([])
   const [loading, setLoading] = useState(true)
@@ -62,19 +59,9 @@ export default function AdminGameLockManager() {
         }))
 
         setGames(formattedGames)
-
-        // שמירה בלוקל סטורג' כגיבוי
-        localStorage.setItem("adminGames", JSON.stringify(formattedGames))
       } catch (error) {
         console.error("Error fetching games:", error)
-
-        // ניסיון לטעון מהלוקל סטורג' במקרה של שגיאה
-        const storedGames = localStorage.getItem("adminGames")
-        if (storedGames) {
-          setGames(JSON.parse(storedGames))
-        } else {
-          setError("אירעה שגיאה בטעינת המשחקים. נסה לרענן את הדף.")
-        }
+        setError("אירעה שגיאה בטעינת המשחקים. נסה לרענן את הדף.")
       } finally {
         setLoading(false)
       }
@@ -106,7 +93,7 @@ export default function AdminGameLockManager() {
     setShowConfirmDialog(true)
   }
 
-  // פונקציה לאישור הפעולה
+  // פונקציה לאישור הפעולה - מתוקנת
   const confirmAction = async () => {
     if (!selectedGame) return
 
@@ -114,6 +101,29 @@ export default function AdminGameLockManager() {
     setError(null)
 
     try {
+      // עדכון ב-Supabase
+      const supabase = getSupabaseClient()
+      if (!supabase) {
+        throw new Error("Supabase client is not available")
+      }
+
+      // ביצוע העדכון במסד הנתונים
+      const { error: updateError, data: updateData } = await supabase
+        .from("games")
+        .update({
+          islocked: actionType === "lock",
+          manuallylocked: actionType === "lock",
+        })
+        .eq("id", selectedGame.id)
+        .select()
+
+      // בדיקה אם העדכון הצליח
+      if (updateError) {
+        console.error("Error updating game lock status:", updateError)
+        throw new Error(`Error updating game: ${updateError.message}`)
+      }
+
+      // רק אם העדכון הצליח, עדכן את המצב המקומי
       const updatedGames = games.map((game) => {
         if (game.id === selectedGame.id) {
           return {
@@ -125,27 +135,15 @@ export default function AdminGameLockManager() {
         return game
       })
 
-      // עדכון ב-Supabase
-      const supabase = getSupabaseClient()
-      if (supabase) {
-        const { error } = await supabase
-          .from("games")
-          .update({
-            islocked: actionType === "lock",
-            manuallylocked: actionType === "lock",
-          })
-          .eq("id", selectedGame.id)
-
-        if (error) {
-          console.error("Error updating game lock status:", error)
-          throw new Error(`Error updating game: ${error.message}`)
-        }
-      }
-
+      // עדכון המצב המקומי
       setGames(updatedGames)
-      localStorage.setItem("adminGames", JSON.stringify(updatedGames))
+
+      // סגירת הדיאלוג
       setShowConfirmDialog(false)
       setSelectedGame(null)
+
+      // הצגת הודעת הצלחה
+      setError(null)
     } catch (error) {
       console.error("Error confirming action:", error)
       setError(error instanceof Error ? error.message : "שגיאה בעדכון סטטוס המשחק")
@@ -186,9 +184,6 @@ export default function AdminGameLockManager() {
       }))
 
       setGames(formattedGames)
-
-      // שמירה בלוקל סטורג' כגיבוי
-      localStorage.setItem("adminGames", JSON.stringify(formattedGames))
     } catch (error) {
       console.error("Error refreshing games:", error)
       setError("אירעה שגיאה ברענון המשחקים.")
@@ -342,8 +337,18 @@ export default function AdminGameLockManager() {
                   actionType === "lock" ? "bg-red-600 hover:bg-red-700" : "bg-green-600 hover:bg-green-700"
                 }`}
                 onClick={confirmAction}
+                disabled={isLoading}
               >
-                {actionType === "lock" ? "נעל משחק" : "פתח משחק"}
+                {isLoading ? (
+                  <span className="flex items-center justify-center">
+                    <RefreshCw className="w-4 h-4 ml-2 animate-spin" />
+                    {actionType === "lock" ? "נועל..." : "פותח..."}
+                  </span>
+                ) : actionType === "lock" ? (
+                  "נעל משחק"
+                ) : (
+                  "פתח משחק"
+                )}
               </button>
             </div>
           </div>

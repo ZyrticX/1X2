@@ -1,19 +1,23 @@
 "use client"
 
+import type React from "react"
+
 import { useState, useEffect } from "react"
 import { Clock } from "lucide-react"
 
+// עדכון הפרופס של GameTimer כדי להתאים לשמות השדות במסד הנתונים
 interface GameTimerProps {
   closingTime: Date
-  isPastDay: boolean
-  isManuallyLocked: boolean
+  isPastDay?: boolean
+  isManuallyLocked?: boolean // שינוי ל-manuallylocked
 }
 
-export default function GameTimer({ closingTime, isPastDay, isManuallyLocked }: GameTimerProps) {
+const GameTimer: React.FC<GameTimerProps> = ({ closingTime, isPastDay = false, isManuallyLocked = false }) => {
   const [timeLeft, setTimeLeft] = useState<string>("")
   const [isNearClosing, setIsNearClosing] = useState(false)
   const [isClosed, setIsClosed] = useState(false)
   const [shouldShowTimer, setShouldShowTimer] = useState(false)
+  const [isLocked, setIsLocked] = useState<boolean>(false)
 
   useEffect(() => {
     // Don't start the timer if it's a past day or manually locked
@@ -44,9 +48,10 @@ export default function GameTimer({ closingTime, isPastDay, isManuallyLocked }: 
         setShouldShowTimer(true)
       }
 
-      if (diff <= 0) {
-        setIsClosed(true)
-        setTimeLeft("סגור")
+      // בדיקה אם המשחק נעול
+      if (diff <= 0 || isPastDay || isManuallyLocked) {
+        setIsLocked(true)
+        setTimeLeft("סגור להימורים")
         setShouldShowTimer(false)
         return
       }
@@ -91,7 +96,7 @@ export default function GameTimer({ closingTime, isPastDay, isManuallyLocked }: 
   }, [closingTime, isPastDay, isManuallyLocked])
 
   // Don't render if we shouldn't show the timer
-  if (!shouldShowTimer || isPastDay || isManuallyLocked || isClosed) {
+  if (!shouldShowTimer || isPastDay || isManuallyLocked || isClosed || isLocked) {
     return null
   }
 
@@ -108,3 +113,5 @@ export default function GameTimer({ closingTime, isPastDay, isManuallyLocked }: 
     </div>
   )
 }
+
+export default GameTimer

@@ -44,75 +44,86 @@ export function AuthProvider({ children }: { children: ReactNode }) {
 
   // בדיקה אם המשתמש כבר מחובר (מהלוקל סטורג')
   useEffect(() => {
-    const storedUserType = localStorage.getItem("userType")
-    const storedIdentifier = localStorage.getItem("userIdentifier")
-    const storedAdminCode = localStorage.getItem("adminCode")
+    // בדיקת אימות מול Supabase בטעינה ראשונית
+    const checkAuthState = async () => {
+      try {
+        const supabase = getSupabaseClient()
+        if (!supabase) return
 
-    if (storedUserType && storedIdentifier) {
-      setUserIdentifier(storedIdentifier)
-      setIsAuthenticated(true)
-      setIsAdmin(storedUserType === "admin")
-      setIsPlayer(storedUserType === "player" || storedUserType === "admin-player")
+        // בדיקה אם יש משתמש מחובר בסשן
+        const {
+          data: { session },
+        } = await supabase.auth.getSession()
 
-      // בדיקה אם המשתמש הוא Super Admin
-      setIsSuperAdmin(SUPER_ADMIN_CODES.includes(storedIdentifier))
+        if (session) {
+          // אם יש סשן פעיל, נשתמש במידע מהסשן
+          const userMetadata = session.user?.user_metadata
+          if (userMetadata) {
+            setUserIdentifier(userMetadata.playercode || session.user?.id)
+            setIsAuthenticated(true)
+            setIsAdmin(userMetadata.role === "admin")
+            setIsPlayer(userMetadata.role === "player" || userMetadata.role === "admin-player")
+            setIsSuperAdmin(SUPER_ADMIN_CODES.includes(userMetadata.playercode || ""))
 
-      if (storedAdminCode) {
-        setAdminCode(storedAdminCode)
+            if (userMetadata.adminCode) {
+              setAdminCode(userMetadata.adminCode)
+            }
+          }
+        }
+      } catch (error) {
+        console.error("Error checking auth state:", error)
       }
     }
+
+    checkAuthState()
   }, [])
 
   // פונקציית התחברות עם קוד
   const loginWithCode = (code: string): boolean => {
-    // בדיקה אם הקוד תקין - כולל קודים שנוספו דינמית
-    const storedCodes = localStorage.getItem("validPlayerCodes")
-    const dynamicCodes = storedCodes ? JSON.parse(storedCodes) : []
-
-    // בדיקה אם זה קוד מנהל
+    // בדיקה אם הקוד תקין
     const isAdminCode = ADMIN_CODES.includes(code)
-    // בדיקה אם זה קוד Super Admin
     const isSuperAdminCode = SUPER_ADMIN_CODES.includes(code)
 
-    // בדיקה אם הקוד קיים ברשימת הקודים המורשים
-    if (VALID_CODES.includes(code) || dynamicCodes.includes(code) || isAdminCode || isSuperAdminCode) {
+    if (VALID_CODES.includes(code) || isAdminCode || isSuperAdminCode) {
       setUserIdentifier(code)
       setIsAuthenticated(true)
-
-      // עדכון סטטוס Super Admin
       setIsSuperAdmin(isSuperAdminCode)
 
       if (isAdminCode || isSuperAdminCode) {
-        // אם זה קוד מנהל, שמור אותו לשימוש עתידי
         setAdminCode(code)
-        localStorage.setItem("adminCode", code)
 
-        // אם זה Super Admin, התחבר ישירות כמנהל ללא בחירת תפקיד
         if (isSuperAdminCode) {
           setIsAdmin(true)
           setIsPlayer(true)
           setIsRoleSelectionRequired(false)
-          localStorage.setItem("userType", "admin")
         } else {
-          // הפעל את מסך בחירת התפקיד למנהלים רגילים
           setIsRoleSelectionRequired(true)
           setIsAdmin(false)
           setIsPlayer(false)
         }
       } else {
-        // התחברות רגילה כשחקן
         setIsPlayer(true)
         setIsAdmin(false)
-        localStorage.setItem("userType", "player")
       }
 
-      localStorage.setItem("userIdentifier", code)
+      // שמירת מצב האימות ב-Supabase אם צריך
+      const supabase = getSupabaseClient()
+      if (supabase) {
+        // אפשר להשתמש ב-custom claims או ב-metadata
+        // לדוגמה:
+        // supabase.auth.updateUser({
+        //   data: {
+        //     playercode: code,
+        //     role: isAdminCode || isSuperAdminCode ? "admin" : "player",
+        //     adminCode: isAdminCode || isSuperAdminCode ? code : null
+        //   }
+        // });
+      }
+
       return true
     }
 
-    // אם הקוד לא נמצא ברשימות הקבועות, בדוק במסד הנתונים
-    // נשתמש בפונקציה אסינכרונית שתבדוק אם הקוד קיים במסד הנתונים
-    // אבל נחזיר false כרגע ונעדכן את המצב בהמשך אם הקוד תקף
+    // בדיקה מול מסד הנתונים
     checkUserCodeInDatabase(code)
     return false
   }
@@ -149,8 +160,8 @@ export function AuthProvider({ children }: { children: ReactNode }) {
           setIsAdmin(false)
 
           // שמירה בלוקל סטורג'
-          localStorage.setItem("userType", "player")
-          localStorage.setItem("userIdentifier", code)
+          // localStorage.setItem("userType", "player")
+          // localStorage.setItem("userIdentifier", code)
 
           // הוספת הקוד לרשימת הקודים המורשים בלוקל סטורג'
           const storedCodes = localStorage.getItem("validPlayerCodes")
@@ -186,9 +197,9 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       // בדיקה אם המשתמש הוא Super Admin
       setIsSuperAdmin(SUPER_ADMIN_CODES.includes(code))
 
-      localStorage.setItem("userIdentifier", code)
-      localStorage.setItem("adminCode", code)
-      localStorage.setItem("userType", "admin")
+      // localStorage.setItem("userIdentifier", code)
+      // localStorage.setItem("adminCode", code)
+      // localStorage.setItem("userType", "admin")
 
       return true
     }
@@ -201,13 +212,13 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       if (role === "admin") {
         setIsAdmin(true)
         setIsPlayer(true)
-        localStorage.setItem("userType", "admin")
       } else {
         setIsAdmin(false)
         setIsPlayer(true)
-        localStorage.setItem("userType", "admin-player")
       }
       setIsRoleSelectionRequired(false)
+
+      // עדכון ב-Supabase אם צריך
     }
   }
 
@@ -217,7 +228,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       setIsAdmin(false)
       setIsPlayer(true)
       // שמירת סוג המשתמש כמנהל-שחקן, אבל שמירת קוד המנהל
-      localStorage.setItem("userType", "admin-player")
+      // localStorage.setItem("userType", "admin-player")
       // חשוב: לא מוחקים את adminCode מהלוקל סטורג'
     }
   }
@@ -227,7 +238,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     if (adminCode) {
       setIsAdmin(true)
       setIsPlayer(true)
-      localStorage.setItem("userType", "admin")
+      // localStorage.setItem("userType", "admin")
     }
   }
 
@@ -240,9 +251,12 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     setIsSuperAdmin(false)
     setAdminCode(null)
     setIsRoleSelectionRequired(false)
-    localStorage.removeItem("userType")
-    localStorage.removeItem("userIdentifier")
-    localStorage.removeItem("adminCode")
+
+    // ניתוק מ-Supabase אם צריך
+    const supabase = getSupabaseClient()
+    if (supabase) {
+      supabase.auth.signOut()
+    }
   }
 
   return (

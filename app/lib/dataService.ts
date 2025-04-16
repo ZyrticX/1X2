@@ -297,12 +297,6 @@ export const getUserPredictions = async (userIdentifier: string): Promise<any[]>
           return []
         }
 
-        // Fallback to localStorage
-        if (typeof window !== "undefined") {
-          const localPredictions = JSON.parse(localStorage.getItem("predictions") || "[]")
-          return localPredictions.filter((pred: any) => pred.user_id === userIdentifier)
-        }
-
         return []
       }
 
@@ -345,12 +339,6 @@ export const getUserPredictions = async (userIdentifier: string): Promise<any[]>
           }
         }
 
-        // Fallback to localStorage
-        if (typeof window !== "undefined") {
-          const localPredictions = JSON.parse(localStorage.getItem("predictions") || "[]")
-          return localPredictions.filter((pred: any) => pred.user_id === userIdentifier)
-        }
-
         return []
       }
 
@@ -372,26 +360,12 @@ export const getUserPredictions = async (userIdentifier: string): Promise<any[]>
 
     if (error) {
       console.error("Error getting user predictions:", error)
-
-      // Fallback to localStorage
-      if (typeof window !== "undefined") {
-        const localPredictions = JSON.parse(localStorage.getItem("predictions") || "[]")
-        return localPredictions.filter((pred: any) => pred.user_id === userIdentifier)
-      }
-
       return []
     }
 
     return data || []
   } catch (error) {
     console.error("Error getting user predictions:", error)
-
-    // Fallback to localStorage
-    if (typeof window !== "undefined") {
-      const localPredictions = JSON.parse(localStorage.getItem("predictions") || "[]")
-      return localPredictions.filter((pred: any) => pred.user_id === userIdentifier)
-    }
-
     return []
   }
 }
@@ -525,20 +499,12 @@ export const submitPrediction = async (prediction: any): Promise<boolean> => {
 export const updateSystemSettings = async (settings: any): Promise<boolean> => {
   try {
     if (!isSupabaseAvailable()) {
-      // Fallback to localStorage if Supabase is not available
-      if (typeof window !== "undefined") {
-        localStorage.setItem("systemSettings", JSON.stringify(settings))
-      }
-      return true
+      return false
     }
 
     const supabase = getSupabaseClient()
     if (!supabase) {
-      // Fallback to localStorage if Supabase client is not available
-      if (typeof window !== "undefined") {
-        localStorage.setItem("systemSettings", JSON.stringify(settings))
-      }
-      return true
+      return false
     }
 
     try {
@@ -547,50 +513,17 @@ export const updateSystemSettings = async (settings: any): Promise<boolean> => {
 
       if (error) {
         console.error("Error updating system settings:", error)
-
-        // If the table doesn't exist, fallback to localStorage
-        if (error.message.includes("does not exist")) {
-          if (typeof window !== "undefined") {
-            localStorage.setItem("systemSettings", JSON.stringify(settings))
-            localStorage.setItem("currentSystemDay", settings.currentday || "")
-          }
-          return true
-        }
         return false
-      }
-
-      // Also save to localStorage for client-side access
-      if (typeof window !== "undefined") {
-        localStorage.setItem("systemSettings", JSON.stringify(settings))
-        if (settings.currentday) {
-          localStorage.setItem("currentSystemDay", settings.currentday)
-        }
       }
 
       return true
     } catch (error) {
       console.error("Error in updateSystemSettings:", error)
-
-      // Fallback to localStorage
-      if (typeof window !== "undefined") {
-        localStorage.setItem("systemSettings", JSON.stringify(settings))
-        if (settings.currentday) {
-          localStorage.setItem("currentSystemDay", settings.currentday)
-        }
-      }
-      return true
+      return false
     }
   } catch (error) {
     console.error("Error updating system settings:", error)
-
-    // Final fallback to localStorage
-    if (typeof window !== "undefined") {
-      localStorage.setItem("systemSettings", JSON.stringify(settings))
-      if (settings.currentday) {
-        localStorage.setItem("currentSystemDay", settings.currentday)
-      }
-    }
-    return true
+    return false
   }
 }
 
@@ -598,60 +531,39 @@ export const updateSystemSettings = async (settings: any): Promise<boolean> => {
 export const getSystemSettings = async (): Promise<any> => {
   try {
     if (!isSupabaseAvailable()) {
-      // Fallback to localStorage if Supabase is not available
-      return getSettingsFromLocalStorage()
+      return { currentday: getCurrentDay() }
     }
 
     const supabase = getSupabaseClient()
     if (!supabase) {
-      // Fallback to localStorage if Supabase client is not available
-      return getSettingsFromLocalStorage()
+      return { currentday: getCurrentDay() }
     }
 
     try {
       const { data, error } = await supabase.from("settings").select("*").limit(1).single()
 
       if (error) {
-        // If the table doesn't exist, don't log it as an error, just use localStorage
+        // If the table doesn't exist, return default settings
         if (error.message.includes("does not exist")) {
-          return getSettingsFromLocalStorage()
+          return { currentday: getCurrentDay() }
         }
 
         console.error("Error getting system settings:", error)
-        return getSettingsFromLocalStorage()
+        return { currentday: getCurrentDay() }
       }
 
-      return data || getSettingsFromLocalStorage()
+      return data || { currentday: getCurrentDay() }
     } catch (error) {
-      // Fallback to localStorage for any other errors
-      return getSettingsFromLocalStorage()
+      // Return default settings for any other errors
+      return { currentday: getCurrentDay() }
     }
   } catch (error) {
     console.error("Error getting system settings:", error)
-    return getSettingsFromLocalStorage()
+    return { currentday: getCurrentDay() }
   }
 }
 
-// Helper function to get settings from localStorage
-function getSettingsFromLocalStorage(): any {
-  if (typeof window !== "undefined") {
-    const settings = localStorage.getItem("systemSettings")
-    if (settings) {
-      return JSON.parse(settings)
-    }
-
-    // If no settings in localStorage, create default settings
-    const currentDay = localStorage.getItem("currentSystemDay") || getCurrentDay()
-    const defaultSettings = { currentday: currentDay }
-    localStorage.setItem("systemSettings", JSON.stringify(defaultSettings))
-    return defaultSettings
-  }
-
-  // If we're on the server, return default settings
-  return { currentday: "sunday" }
-}
-
-// Add helper function to get current day
+// Helper function to get current day
 function getCurrentDay(): string {
   const days = ["sunday", "monday", "tuesday", "wednesday", "thursday", "friday", "saturday"]
   const today = new Date().getDay() // 0 = Sunday, 1 = Monday, etc.

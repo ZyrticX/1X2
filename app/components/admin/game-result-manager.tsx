@@ -205,8 +205,8 @@ export default function GameResultManager() {
         .from("games")
         .update({
           result,
-          isfinished: true,
-          islocked: true, // הוספת שדה נעילה
+          isfinished: true, // שימוש ב-isfinished במקום isFinished
+          islocked: true, // שימוש ב-islocked במקום isLocked
           updated_at: new Date().toISOString(),
         })
         .eq("id", gameId)
