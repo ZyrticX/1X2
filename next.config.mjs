@@ -5,6 +5,7 @@ const nextConfig = {
   // הגדרות נוספות
   reactStrictMode: true,
   swcMinify: true,
+  // הוספת ההגדרות החדשות לפתרון בעיית הבנייה
   eslint: {
     ignoreDuringBuilds: true,
   },
