@@ -76,20 +76,48 @@ export const submitPrediction = async (prediction: any): Promise<boolean> => {
       if (userData && userData.length > 0) {
         const userId = userData[0].id
 
-        // שמירת הניחוש עם ה-ID של המשתמש
-        const { error: predError } = await supabase.from("predictions").insert([
-          {
-            userid: userId,
-            gameid: prediction.game_id,
-            prediction: prediction.prediction,
-            timestamp: new Date().toISOString(),
-          },
-        ])
+        // בדיקה אם כבר קיים ניחוש למשחק זה מהמשתמש הזה
+        const { data: existingPrediction, error: checkError } = await supabase
+          .from("predictions")
+          .select("*")
+          .eq("gameid", prediction.game_id)
+          .eq("userid", userId)
 
-        if (predError) {
-          console.error("Error saving prediction:", predError)
-          // אם יש שגיאה, נסתפק בשמירה בלוקל סטורג'
-          return true
+        if (checkError) {
+          console.error("Error checking existing prediction:", checkError)
+          return true // מחזיר הצלחה כי שמרנו בלוקל סטורג'
+        }
+
+        if (existingPrediction && existingPrediction.length > 0) {
+          // עדכון ניחוש קיים
+          const { error: updateError } = await supabase
+            .from("predictions")
+            .update({
+              prediction: prediction.prediction,
+              timestamp: new Date().toISOString(),
+            })
+            .eq("id", existingPrediction[0].id)
+
+          if (updateError) {
+            console.error("Error updating prediction:", updateError)
+            return true // מחזיר הצלחה כי שמרנו בלוקל סטורג'
+          }
+        } else {
+          // שמירת הניחוש עם ה-ID של המשתמש
+          const { error: predError } = await supabase.from("predictions").insert([
+            {
+              userid: userId,
+              gameid: prediction.game_id,
+              prediction: prediction.prediction,
+              timestamp: new Date().toISOString(),
+            },
+          ])
+
+          if (predError) {
+            console.error("Error saving prediction:", predError)
+            // אם יש שגיאה, נסתפק בשמירה בלוקל סטורג'
+            return true
+          }
         }
       } else {
         // אם המשתמש לא קיים, שמור רק בלוקל סטורג'

@@ -60,6 +60,7 @@ export default function AdminGameVotingStatus() {
   const [autoRefresh, setAutoRefresh] = useState(true)
   const [refreshTrigger, setRefreshTrigger] = useState(0)
   const [error, setError] = useState<string | null>(null)
+  const [currentWeek, setCurrentWeek] = useState(1)
 
   // עדכון שעת העדכון האחרונה
   const updateLastUpdateTime = useCallback(() => {
@@ -82,8 +83,49 @@ export default function AdminGameVotingStatus() {
           throw new Error("Supabase client is not available")
         }
 
-        // טעינת משחקים
-        const { data: gamesData, error: gamesError } = await supabase.from("games").select("*").order("date")
+        // קבלת השבוע הנוכחי
+        const { data: settingsData, error: settingsError } = await supabase
+          .from("settings")
+          .select("*")
+          .eq("id", "current_week")
+          .single()
+
+        const currentWeek = settingsData ? Number.parseInt(settingsData.value) : 1
+        setCurrentWeek(currentWeek)
+
+        // טעינת המשחקים השבועיים מטבלת WEEKLY_GAMES
+        const { data: weeklyGamesData, error: weeklyGamesError } = await supabase
+          .from("weekly_games")
+          .select("*")
+          .eq("week", currentWeek)
+          .single()
+
+        if (weeklyGamesError && !weeklyGamesError.message.includes("No rows found")) {
+          console.error("Error fetching weekly games:", weeklyGamesError)
+        }
+
+        // המרת ה-JSONB של טבלת WEEKLY_GAMES לרשימת מזהים
+        const gameIds: string[] = []
+        if (weeklyGamesData && weeklyGamesData.games) {
+          // מעבר על כל הימים ואיסוף מזהי המשחקים
+          Object.values(weeklyGamesData.games).forEach((dayGames: any) => {
+            gameIds.push(...dayGames)
+          })
+        }
+
+        // טעינת רק המשחקים שנמצאים ברשימת המזהים מטבלת WEEKLY_GAMES
+        let gamesQuery = supabase.from("games").select("*")
+
+        // אם יש מזהי משחקים, סנן לפיהם
+        if (gameIds.length > 0) {
+          gamesQuery = gamesQuery.in("id", gameIds)
+        } else {
+          // אם אין משחקים שבועיים, טען לפי השבוע הנוכחי
+          gamesQuery = gamesQuery.eq("week", currentWeek)
+        }
+
+        const { data: gamesData, error: gamesError } = await gamesQuery.order("date")
+
         if (gamesError) {
           throw new Error(`Error fetching games: ${gamesError.message}`)
         }
@@ -329,6 +371,8 @@ export default function AdminGameVotingStatus() {
       <div className="flex justify-between items-center mb-4">
         <h3 className="text-lg font-bold flex items-center">
           <span>סטטוס הצבעות למשחקים</span>
+          {/* הוספת תצוגת השבוע הנוכחי */}
+          <span className="ml-2 px-3 py-1 bg-blue-100 text-blue-700 rounded-full text-sm">שבוע {currentWeek}</span>
         </h3>
         <div className="flex items-center space-x-2 rtl:space-x-reverse">
           {lastUpdateTime && (

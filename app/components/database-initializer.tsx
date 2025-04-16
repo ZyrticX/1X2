@@ -32,6 +32,36 @@ export default function DatabaseInitializer() {
           console.log("weekly_games table exists, no initialization needed")
           setNeedsInitialization(false)
         }
+
+        // בדיקה אם המשתמש הסופר אדמין קיים
+        const { data: adminUser, error: adminError } = await supabase
+          .from("users")
+          .select("*")
+          .eq("playercode", "323317966")
+          .single()
+
+        if (adminError || !adminUser) {
+          console.log("Super admin user does not exist, creating...")
+          // יצירת משתמש סופר אדמין אם הוא לא קיים
+          const { error: createError } = await supabase.from("users").insert([
+            {
+              name: "מנהל ראשי",
+              playercode: "323317966",
+              status: "active",
+              points: 0,
+              created_at: new Date().toISOString(),
+              updated_at: new Date().toISOString(),
+            },
+          ])
+
+          if (createError) {
+            console.error("Error creating super admin user:", createError)
+          } else {
+            console.log("Super admin user created successfully")
+          }
+        } else {
+          console.log("Super admin user exists:", adminUser)
+        }
       } catch (err) {
         console.error("Error checking database:", err)
         setError("שגיאה בבדיקת מסד הנתונים")
@@ -56,16 +86,16 @@ export default function DatabaseInitializer() {
 
       // יצירת טבלת weekly_games בלבד
       const createWeeklyGamesTable = `
-      CREATE TABLE IF NOT EXISTS weekly_games (
-        id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
-        week INTEGER NOT NULL,
-        games JSONB NOT NULL,
-        created_at TIMESTAMP WITH TIME ZONE DEFAULT NOW(),
-        updated_at TIMESTAMP WITH TIME ZONE DEFAULT NOW()
-      );
-      
-      CREATE INDEX IF NOT EXISTS weekly_games_week_idx ON weekly_games(week);
-    `
+     CREATE TABLE IF NOT EXISTS weekly_games (
+       id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
+       week INTEGER NOT NULL,
+       games JSONB NOT NULL,
+       created_at TIMESTAMP WITH TIME ZONE DEFAULT NOW(),
+       updated_at TIMESTAMP WITH TIME ZONE DEFAULT NOW()
+     );
+     
+     CREATE INDEX IF NOT EXISTS weekly_games_week_idx ON weekly_games(week);
+   `
 
       // ניסיון ליצור את הטבלה
       try {
@@ -102,6 +132,33 @@ export default function DatabaseInitializer() {
           }
         }
 
+        // יצירת משתמש סופר אדמין אם הוא לא קיים
+        const { data: adminUser, error: adminError } = await supabase
+          .from("users")
+          .select("*")
+          .eq("playercode", "323317966")
+          .single()
+
+        if (adminError || !adminUser) {
+          console.log("Creating super admin user during initialization...")
+          const { error: createError } = await supabase.from("users").insert([
+            {
+              name: "מנהל ראשי",
+              playercode: "323317966",
+              status: "active",
+              points: 0,
+              created_at: new Date().toISOString(),
+              updated_at: new Date().toISOString(),
+            },
+          ])
+
+          if (createError) {
+            console.error("Error creating super admin user:", createError)
+          } else {
+            console.log("Super admin user created successfully during initialization")
+          }
+        }
+
         console.log("weekly_games table created successfully")
         setSuccess(true)
         setNeedsInitialization(false)
@@ -110,8 +167,8 @@ export default function DatabaseInitializer() {
 
         // אם אין הרשאות SQL, הצע לייבא את הסקריפט ידנית
         setError(`אין הרשאות ליצירת טבלאות או שאירעה שגיאה. יש לייבא את הסקריפט ידנית דרך ממשק ה-SQL של Supabase.
-      
-      הסקריפט נמצא בקובץ scripts/create_weekly_games_table.sql`)
+     
+     הסקריפט נמצא בקובץ scripts/create_weekly_games_table.sql`)
       }
     } catch (err) {
       console.error("Error initializing database:", err)

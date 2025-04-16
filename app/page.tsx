@@ -7,8 +7,8 @@ import { useRouter } from "next/navigation"
 import { useAuth } from "./contexts/auth-context"
 import { getSupabaseClient } from "./lib/supabaseClient"
 import GameTimer from "./components/game-timer"
+import Link from "next/link"
 
-// Updated mock data for weekly games with closing times and mock predictions
 const emptyWeeklyGames = {
   sunday: [],
   monday: [],
@@ -21,12 +21,6 @@ const emptyWeeklyGames = {
 
 const daysOfWeek = ["sunday", "monday", "tuesday", "wednesday", "thursday", "friday", "saturday"]
 
-// Mock data for other players' predictions
-const mockOtherPredictions: Record<
-  string,
-  Array<{ playerName: string; prediction: string; submissionTime: string }>
-> = {}
-
 // טיפוס למשחק
 interface Game {
   id: string
@@ -38,18 +32,11 @@ interface Game {
   result?: string
   isFinished?: boolean
   manuallyLocked?: boolean
+  islocked?: boolean
 }
 
 // פונקציית עזר להמרת יום לערך מספרי לצורך השוואה
 const getDayOfWeek = () => {
-  // Check if there's a system day set by super admin
-  if (typeof window !== "undefined") {
-    const systemDay = localStorage.getItem("currentSystemDay")
-    if (systemDay) {
-      return systemDay
-    }
-  }
-
   // Otherwise use the actual day
   const today = new Date()
   const dayOfWeek = today.getDay() // 0 = יום ראשון, 1 = יום שני, וכו'
@@ -59,7 +46,7 @@ const getDayOfWeek = () => {
     1: "monday",
     2: "tuesday",
     3: "wednesday",
-    4: "thursday",
+    4: "friday",
     5: "friday",
     6: "saturday",
   }
@@ -95,7 +82,6 @@ const isGameDayReached = (day: string) => {
   return day === currentDay
 }
 
-// הוספת הצגת מספר השבוע הנוכחי בעמוד הראשי
 export default function Home() {
   const {
     isAuthenticated,
@@ -160,284 +146,137 @@ export default function Home() {
 
   // עדכון מצב הכניסה
   useEffect(() => {
-    setShowLoginPage(!isAuthenticated)
-  }, [isAuthenticated])
-
-  // Add a function to check localStorage contents for debugging
-  const debugLocalStorage = () => {
-    if (typeof window === "undefined") return
-
-    console.log("--- DEBUG LOCALSTORAGE ---")
-
-    // Check for selectedGames_week_X entries
-    const weekKeys = Object.keys(localStorage).filter((key) => key.startsWith("selectedGames_week_"))
-    console.log("Week keys:", weekKeys)
-
-    weekKeys.forEach((key) => {
-      try {
-        const data = JSON.parse(localStorage.getItem(key) || "{}")
-        const gameCount = Object.values(data).flat().length
-        console.log(`${key}: ${gameCount} games`)
-        console.log("Sample data:", data)
-      } catch (e) {
-        console.error(`Error parsing ${key}:`, e)
-      }
-    })
-
-    // Check games, cachedGames, cachedGamesByDay
-    ;["games", "cachedGames", "cachedGamesByDay"].forEach((key) => {
-      try {
-        const data = JSON.parse(localStorage.getItem(key) || "{}")
-        if (Array.isArray(data)) {
-          console.log(`${key}: ${data.length} items`)
-        } else {
-          console.log(`${key}: Object with ${Object.keys(data).length} keys`)
-        }
-      } catch (e) {
-        console.error(`Error parsing ${key}:`, e)
-      }
-    })
-
-    console.log("--- END DEBUG ---")
-  }
+    if (isAuthenticated && router.pathname === "/login") {
+      router.push("/")
+    }
+  }, [isAuthenticated, router])
 
   // עדכון useEffect שטוען את המשחקים
   useEffect(() => {
-    debugLocalStorage()
-
     const loadGamesFromDB = async () => {
       try {
         setLoadingGames(true)
         console.log("Starting to load games...")
 
-        // ראשית, ננסה לטעון משחקים מ-Supabase
-        let gamesLoaded = false
-
+        // טעינת משחקים מ-Supabase
         try {
           const supabase = getSupabaseClient()
           if (supabase) {
-            // קבל את מספר השבוע הנוכחי
-            const storedWeek = localStorage.getItem("currentWeek") || "1"
-            const weekNumber = Number.parseInt(storedWeek)
+            // קבל את מספר השבוע הנוכחי (נשתמש ב-1 כברירת מחדל)
+            const { data: settingsData, error: settingsError } = await supabase
+              .from("settings")
+              .select("*")
+              .eq("id", "current_week")
+              .single()
 
-            console.log("Attempting to load games for week:", weekNumber)
+            const weekNumber = settingsData ? Number.parseInt(settingsData.value) : 1
+            setCurrentWeek(weekNumber)
+            console.log("Current week:", weekNumber)
 
-            // נסה לטעון את המשחקים ישירות מטבלת games
-            try {
-              // בדיקה אם עמודת week קיימת
-              const { data: columnsData, error: columnsError } = await supabase.rpc("get_table_columns", {
-                table_name: "games",
-              })
+            // טעינת המשחקים השבועיים מטבלת WEEKLY_GAMES
+            const { data: weeklyGamesData, error: weeklyGamesError } = await supabase
+              .from("weekly_games")
+              .select("*")
+              .eq("week", weekNumber)
+              .single()
 
-              let hasWeekColumn = false
-              if (!columnsError && columnsData) {
-                hasWeekColumn = columnsData.some((col: any) => col.column_name === "week")
-              }
-
-              // אם עמודת week לא קיימת, טען את כל המשחקים ללא סינון
-              let gamesQuery
-              if (hasWeekColumn) {
-                // Only get games where week is explicitly set to the current week number
-                // and is not null
-                gamesQuery = supabase.from("games").select("*").eq("week", weekNumber).not("week", "is", null)
-              } else {
-                console.log("Week column does not exist, loading all games")
-                gamesQuery = supabase.from("games").select("*")
-              }
-
-              const { data: gamesData, error: gamesError } = await gamesQuery
-
-              if (gamesError) {
-                if (gamesError.message.includes("does not exist")) {
-                  console.log("games table does not exist, falling back to localStorage")
-                  // במקום לזרוק שגיאה, פשוט נמשיך לטעינה מהלוקל סטורג'
-                } else {
-                  console.error("Error loading games:", gamesError)
-                }
-                // בכל מקרה של שגיאה, נמשיך לטעינה מהלוקל סטורג'
-              } else if (gamesData && gamesData.length > 0) {
-                console.log("Loaded games from Supabase:", gamesData)
-                console.log(
-                  "Games count by week:",
-                  gamesData.reduce((acc, game) => {
-                    acc[game.week || "null"] = (acc[game.week || "null"] || 0) + 1
-                    return acc
-                  }, {}),
-                )
-
-                // ארגון המשחקים לפי ימים
-                const gamesByDay: Record<string, any[]> = {
-                  sunday: [],
-                  monday: [],
-                  tuesday: [],
-                  wednesday: [],
-                  thursday: [],
-                  friday: [],
-                  saturday: [],
-                }
-
-                // Check if we have selectedGames in localStorage
-                const storedSelectedGames = localStorage.getItem(`selectedGames_week_${weekNumber}`)
-                let selectedGameIds: string[] = []
-
-                if (storedSelectedGames) {
-                  try {
-                    const parsedSelectedGames = JSON.parse(storedSelectedGames)
-                    // Flatten the object to get all selected game IDs
-                    selectedGameIds = Object.values(parsedSelectedGames).flat() as string[]
-                    console.log(`Found ${selectedGameIds.length} selected games in localStorage for week ${weekNumber}`)
-                  } catch (e) {
-                    console.error("Error parsing selectedGames from localStorage:", e)
-                  }
-                }
-
-                // Filter games to only include selected ones if we have a selection
-                const filteredGamesData =
-                  selectedGameIds.length > 0 ? gamesData.filter((game) => selectedGameIds.includes(game.id)) : gamesData
-
-                console.log(`Filtered from ${gamesData.length} to ${filteredGamesData.length} games based on selection`)
-
-                // Now organize by day
-                filteredGamesData.forEach((game) => {
-                  const gameDate = new Date(game.date)
-                  const day = gameDate.getDay()
-                  const dayNames = ["sunday", "monday", "tuesday", "wednesday", "thursday", "friday", "saturday"]
-                  const dayName = dayNames[day]
-
-                  if (gamesByDay[dayName]) {
-                    // המרת המשחק לפורמט המתאים לממשק
-                    gamesByDay[dayName].push({
-                      id: game.id,
-                      homeTeam: game.hometeam,
-                      awayTeam: game.awayteam,
-                      time: game.time,
-                      league: game.league,
-                      closingTime: game.closingtime ? new Date(game.closingtime) : undefined,
-                      isFinished: game.isfinished,
-                      result: game.result,
-                    })
-                  }
-                })
-
-                // לאחר הלולאה, נוודא שלכל יום יש רק 3 משחקים
-                Object.keys(gamesByDay).forEach((day) => {
-                  if (gamesByDay[day].length > 3) {
-                    gamesByDay[day] = gamesByDay[day].slice(0, 3)
-                  }
-                })
-
-                // עדכון המשחקים השבועיים
-                setWeeklyGames(gamesByDay)
-                setGames(gamesData)
-
-                // שמירה בלוקל סטורג' לשימוש במקרה של בעיות תקשורת
-                localStorage.setItem("cachedGames", JSON.stringify(gamesData))
-                localStorage.setItem("cachedGamesByDay", JSON.stringify(gamesByDay))
-                localStorage.setItem("lastGamesUpdate", new Date().toISOString())
-
-                gamesLoaded = true
-                console.log("Successfully loaded and cached games from Supabase")
-                return // נצא מהפונקציה אם הטעינה הצליחה
-              } else {
-                console.log("No games found for week", weekNumber)
-                // נמשיך לטעינה מהלוקל סטורג'
-              }
-            } catch (gamesError) {
-              console.error("Error in games query:", gamesError)
-              // נמשיך לטעינה מהלוקל סטורג'
+            if (weeklyGamesError && !weeklyGamesError.message.includes("No rows found")) {
+              console.error("Error loading weekly games:", weeklyGamesError)
+              setWeeklyGames(emptyWeeklyGames)
+              setGames([])
+              setLoadingGames(false)
+              return
             }
-          }
-        } catch (supabaseError) {
-          console.error("Error loading games from Supabase:", supabaseError)
-          // נמשיך לטעינה מהלוקל סטורג'
-        }
 
-        // אם לא הצלחנו לטעון מ-Supabase, ננסה לטעון מהלוקל סטורג'
-        if (!gamesLoaded) {
-          console.log("Attempting to load games from localStorage")
-          try {
-            // נסה לטעון מהמטמון המקומי קודם (מהטעינה האחרונה המוצלחת מ-Supabase)
-            const cachedGames = localStorage.getItem("cachedGames")
-            const cachedGamesByDay = localStorage.getItem("cachedGamesByDay")
-
-            if (cachedGames && cachedGamesByDay) {
-              console.log("Using cached games from previous Supabase load")
-              setGames(JSON.parse(cachedGames))
-              setWeeklyGames(JSON.parse(cachedGamesByDay))
-              gamesLoaded = true
-            } else {
-              // קבל את מספר השבוע הנוכחי
-              const storedWeek = localStorage.getItem("currentWeek") || "1"
-              const weekNumber = Number.parseInt(storedWeek)
-
-              // טען את המשחקים השבועיים מהלוקל סטורג'
-              const storedSelectedGames = localStorage.getItem(`selectedGames_week_${weekNumber}`)
-              const storedGames = localStorage.getItem("games")
-
-              if (storedSelectedGames && storedGames) {
-                const selectedGames = JSON.parse(storedSelectedGames)
-                const allGames = JSON.parse(storedGames)
-
-                console.log("Loaded games from localStorage:", allGames)
-
-                // ארגון המשחקים לפי ימים
-                const gamesByDay: Record<string, any[]> = {
-                  sunday: [],
-                  monday: [],
-                  tuesday: [],
-                  wednesday: [],
-                  thursday: [],
-                  friday: [],
-                  saturday: [],
-                }
-
-                // עבור על כל הימים והמשחקים הנבחרים
-                for (const [day, gameIds] of Object.entries(selectedGames)) {
-                  if (!gameIds.length) continue
-
-                  // עבור על כל המשחקים הנבחרים ליום זה
-                  for (const gameId of gameIds as string[]) {
-                    // מצא את המשחק במערך המשחקים
-                    const gameData = allGames.find((g: any) => g.id === gameId)
-
-                    if (gameData) {
-                      gamesByDay[day].push({
-                        id: gameData.id,
-                        homeTeam: gameData.hometeam,
-                        awayTeam: gameData.awayteam,
-                        time: gameData.time,
-                        league: gameData.league,
-                        closingTime: gameData.closingtime ? new Date(gameData.closingtime) : undefined,
-                        isFinished: gameData.isfinished,
-                        result: gameData.result,
-                      })
-                    }
-                  }
-                }
-
-                // עדכון המשחקים השבועיים
-                setWeeklyGames(gamesByDay)
-                setGames(allGames)
-                gamesLoaded = true
-                console.log("Successfully loaded games from localStorage")
-              } else {
-                console.log("No games found in localStorage")
-              }
+            // אם אין נתונים בטבלת WEEKLY_GAMES, הצג הודעה ריקה
+            if (!weeklyGamesData || !weeklyGamesData.games) {
+              console.log("No weekly games found for week", weekNumber)
+              setWeeklyGames(emptyWeeklyGames)
+              setGames([])
+              setLoadingGames(false)
+              return
             }
-          } catch (localStorageError) {
-            console.error("Error loading games from localStorage:", localStorageError)
-          }
-        }
 
-        // אם עדיין לא הצלחנו לטעון משחקים, השתמש במשחקי ברירת המחדל
-        if (!gamesLoaded) {
-          console.log("No games available")
+            // המרת ה-JSONB של טבלת WEEKLY_GAMES לרשימת מזהים
+            const gameIds: string[] = []
+            Object.values(weeklyGamesData.games).forEach((dayGames: any) => {
+              if (Array.isArray(dayGames)) {
+                gameIds.push(...dayGames)
+              }
+            })
+
+            console.log(`Found ${gameIds.length} game IDs in weekly_games table`)
+
+            // אם אין משחקים בטבלת WEEKLY_GAMES, הצג הודעה ריקה
+            if (gameIds.length === 0) {
+              console.log("No games found in weekly_games")
+              setWeeklyGames(emptyWeeklyGames)
+              setGames([])
+              setLoadingGames(false)
+              return
+            }
+
+            // טעינת רק המשחקים שנמצאים ברשימת המזהים מטבלת WEEKLY_GAMES
+            const { data: gamesData, error: gamesError } = await supabase
+              .from("games")
+              .select("*")
+              .in("id", gameIds)
+              .order("date")
+
+            if (gamesError) {
+              console.error("Error loading games:", gamesError)
+              setWeeklyGames(emptyWeeklyGames)
+              setGames([])
+              setLoadingGames(false)
+              return
+            }
+
+            console.log(`Loaded ${gamesData?.length || 0} games from database`)
+
+            // ארגון המשחקים לפי ימים
+            const gamesByDay: Record<string, any[]> = {
+              sunday: [],
+              monday: [],
+              tuesday: [],
+              wednesday: [],
+              thursday: [],
+              friday: [],
+              saturday: [],
+            }
+
+            gamesData?.forEach((game) => {
+              const gameDate = new Date(game.date)
+              const day = gameDate.getDay() // 0 = Sunday, 1 = Monday, etc.
+              const dayNames = ["sunday", "monday", "tuesday", "wednesday", "thursday", "friday", "saturday"]
+              const dayName = dayNames[day]
+
+              if (gamesByDay[dayName]) {
+                // המרת המשחק לפורמט המתאים לממשק
+                gamesByDay[dayName].push({
+                  id: game.id,
+                  homeTeam: game.hometeam,
+                  awayTeam: game.awayteam,
+                  time: game.time,
+                  league: game.league,
+                  closingTime: game.closingtime ? new Date(game.closingtime) : undefined,
+                  isFinished: game.isfinished,
+                  result: game.result,
+                  islocked: game.islocked,
+                })
+              }
+            })
+
+            // עדכון המשחקים השבועיים
+            setWeeklyGames(gamesByDay)
+            setGames(gamesData || [])
+          }
+        } catch (error) {
+          console.error("Error loading games from Supabase:", error)
           setWeeklyGames(emptyWeeklyGames)
           setGames([])
         }
       } catch (error) {
         console.error("Error loading games:", error)
-        // Fallback to empty data in case of any error
         setWeeklyGames(emptyWeeklyGames)
         setGames([])
       } finally {
@@ -445,50 +284,8 @@ export default function Home() {
       }
     }
 
-    // פונקציה לבדיקת עדכונים במשחקים
-    const checkForGameUpdates = () => {
-      // בדוק אם יש שינויים בלוקאלסטורג'
-      const storedWeek = localStorage.getItem("currentWeek") || "1"
-      const weekNumber = Number.parseInt(storedWeek)
-
-      // שמור את הזמן האחרון שבו נבדקו עדכונים
-      const lastCheckTime = localStorage.getItem("lastGameCheckTime")
-      const currentTime = new Date().getTime().toString()
-
-      // אם עברו לפחות 30 שניות מהבדיקה האחרונה
-      if (!lastCheckTime || Number(currentTime) - Number(lastCheckTime) > 30000) {
-        // עדכן את זמן הבדיקה האחרון
-        localStorage.setItem("lastGameCheckTime", currentTime)
-
-        // בדוק אם יש שינויים בלוקל סטורג' בלי לרענן את הדף
-        const storedGames = localStorage.getItem("cachedGames")
-        const storedGamesByDay = localStorage.getItem("cachedGamesByDay")
-        if (storedGames && storedGamesByDay) {
-          try {
-            const parsedGames = JSON.parse(storedGames)
-            const parsedGamesByDay = JSON.parse(storedGamesByDay)
-
-            // עדכן את המצב רק אם יש שינויים
-            if (JSON.stringify(parsedGames) !== JSON.stringify(games)) {
-              setGames(parsedGames)
-              setWeeklyGames(parsedGamesByDay)
-              console.log("Updated games from localStorage without page refresh")
-            }
-          } catch (error) {
-            console.error("Error parsing cached games:", error)
-          }
-        }
-      }
-    }
-
     // טען את המשחקים בטעינה ראשונית
     loadGamesFromDB()
-
-    // הגדר בדיקה תקופתית לעדכוני משחקים
-    const gameUpdateInterval = setInterval(checkForGameUpdates, 10000) // בדוק כל 10 שניות
-
-    // נקה את ה-interval כשהקומפוננטה מתפרקת
-    return () => clearInterval(gameUpdateInterval)
   }, [])
 
   // טעינת שם המשתמש
@@ -530,72 +327,76 @@ export default function Home() {
 
   // פונקציה לרענון מיידי של המשחקים
   const forceRefreshGames = () => {
-    // מחיקת המטמון של המשחקים כדי לאלץ טעינה מחדש
-    localStorage.removeItem("cachedGames")
-    localStorage.removeItem("cachedGamesByDay")
-    localStorage.removeItem("lastGamesUpdate")
-
-    // טעינה מחדש של המשחקים
     const loadGamesFromDB = async () => {
       setLoadingGames(true)
       try {
         const supabase = getSupabaseClient()
         if (supabase) {
-          const storedWeek = localStorage.getItem("currentWeek") || "1"
-          const weekNumber = Number.parseInt(storedWeek)
+          const weekNumber = 1
 
           // טעינה ישירה מ-Supabase
-          const { data: gamesData, error: gamesError } = await supabase.from("games").select("*").eq("week", weekNumber)
+          const { data: gamesData, error: gamesError } = await supabase
+            .from("games")
+            .select("*")
+            .eq("week", weekNumber)
+            .order("date")
 
-          if (!gamesError && gamesData && gamesData.length > 0) {
-            // ארגון המשחקים לפי ימים
-            const gamesByDay: Record<string, any[]> = {
-              sunday: [],
-              monday: [],
-              tuesday: [],
-              wednesday: [],
-              thursday: [],
-              friday: [],
-              saturday: [],
-            }
-
-            gamesData.forEach((game) => {
-              const gameDate = new Date(game.date)
-              const day = gameDate.getDay()
-              const dayNames = ["sunday", "monday", "tuesday", "wednesday", "thursday", "friday", "saturday"]
-              const dayName = dayNames[day]
-
-              if (gamesByDay[dayName]) {
-                // המרת המשחק לפורמט המתאים לממשק
-                gamesByDay[dayName].push({
-                  id: game.id,
-                  homeTeam: game.hometeam,
-                  awayTeam: game.awayteam,
-                  time: game.time,
-                  league: game.league,
-                  closingTime: game.closingtime ? new Date(game.closingtime) : undefined,
-                  isFinished: game.isfinished,
-                  result: game.result,
-                })
-              }
-            })
-
-            // לאחר הלולאה, נוודא שלכל יום יש רק 3 משחקים
-            Object.keys(gamesByDay).forEach((day) => {
-              if (gamesByDay[day].length > 3) {
-                gamesByDay[day] = gamesByDay[day].slice(0, 3)
-              }
-            })
-
-            // עדכון המשחקים השבועיים
-            setWeeklyGames(gamesByDay)
-            setGames(gamesData)
-
-            console.log("Successfully refreshed games from Supabase")
+          if (gamesError) {
+            console.error("Error loading games:", gamesError)
+            setWeeklyGames(emptyWeeklyGames)
+            setGames([])
+            setLoadingGames(false)
+            return
           }
+
+          // ארגון המשחקים לפי ימים
+          const gamesByDay: Record<string, any[]> = {
+            sunday: [],
+            monday: [],
+            tuesday: [],
+            wednesday: [],
+            thursday: [],
+            friday: [],
+            saturday: [],
+          }
+
+          gamesData.forEach((game) => {
+            const gameDate = new Date(game.date)
+            const day = gameDate.getDay()
+            const dayNames = ["sunday", "monday", "tuesday", "wednesday", "thursday", "friday", "saturday"]
+            const dayName = dayNames[day]
+
+            if (gamesByDay[dayName]) {
+              // המרת המשחק לפורמט המתאים לממשק
+              gamesByDay[dayName].push({
+                id: game.id,
+                homeTeam: game.hometeam,
+                awayTeam: game.awayteam,
+                time: game.time,
+                league: game.league,
+                closingTime: game.closingtime ? new Date(game.closingtime) : undefined,
+                isFinished: game.isfinished,
+                result: game.result,
+                islocked: game.islocked,
+              })
+            }
+          })
+
+          // לאחר הלולאה, נוודא שלכל יום יש רק 3 משחקים
+          Object.keys(gamesByDay).forEach((day) => {
+            if (gamesByDay[day].length > 3) {
+              gamesByDay[day] = gamesByDay[day].slice(0, 3)
+            }
+          })
+
+          // עדכון המשחקים השבועיים
+          setWeeklyGames(gamesByDay)
+          setGames(gamesData)
         }
       } catch (error) {
         console.error("Error refreshing games:", error)
+        setWeeklyGames(emptyWeeklyGames)
+        setGames([])
       } finally {
         setLoadingGames(false)
       }
@@ -605,36 +406,8 @@ export default function Home() {
   }
 
   useEffect(() => {
-    // טעינת מספר השבוע הנוכחי מהלוקל סטורג'
-    if (typeof window !== "undefined") {
-      const storedWeek = localStorage.getItem("currentWeek")
-      if (storedWeek) {
-        const weekNum = Number.parseInt(storedWeek, 10)
-        setCurrentWeek(isNaN(weekNum) ? 1 : weekNum)
-      }
-
-      // טעינת משחקים נעולים ידנית
-      const storedLockedGames = localStorage.getItem("adminGames")
-      if (storedLockedGames) {
-        try {
-          const adminGames = JSON.parse(storedLockedGames)
-          const lockedGamesMap: Record<string, boolean> = {}
-
-          adminGames.forEach((game: any) => {
-            if (game.manuallyLocked) {
-              lockedGamesMap[game.id] = true
-            }
-          })
-
-          setManuallyLockedGames(lockedGamesMap)
-        } catch (error) {
-          console.error("Error parsing locked games:", error)
-        }
-      }
-
-      // הגדר את היום הנוכחי כברירת מחדל
-      setActiveDay(getDayOfWeek())
-    }
+    // הגדר את היום הנוכחי כברירת מחדל
+    setActiveDay(getDayOfWeek())
   }, [])
 
   // פונקציה לשמירת ניחוש
@@ -645,7 +418,7 @@ export default function Home() {
     }))
   }
 
-  // פונקציה להגשת ניחוש
+  // פונקציה להגשת ניחוש - מעודכנת כדי לטפל בהמרת קוד שחקן ל-UUID
   const submitPrediction = async (gameId: string) => {
     if (!isAuthenticated || !userIdentifier) {
       alert("יש להתחבר כדי לשלוח ניחושים")
@@ -659,80 +432,110 @@ export default function Home() {
     }
 
     try {
-      // שמירה בלוקל סטורג' כגיבוי
-      const localPredictions = JSON.parse(localStorage.getItem("predictions") || "[]")
-      const existingPredictionIndex = localPredictions.findIndex(
-        (p: any) => p.game_id === gameId && p.user_id === userIdentifier,
-      )
-
-      if (existingPredictionIndex >= 0) {
-        localPredictions[existingPredictionIndex].prediction = prediction
-      } else {
-        localPredictions.push({
-          game_id: gameId,
-          user_id: userIdentifier,
-          prediction,
-          created_at: new Date().toISOString(),
-        })
-      }
-
-      localStorage.setItem("predictions", JSON.stringify(localPredictions))
-
       // שמירה ב-Supabase
-      try {
-        const supabase = getSupabaseClient()
-        if (supabase) {
-          // בדיקה אם הניחוש כבר קיים
-          const { data: existingPrediction, error: checkError } = await supabase
-            .from("predictions")
-            .select("*")
-            .eq("gameid", gameId)
-            .eq("userid", userIdentifier)
+      const supabase = getSupabaseClient()
+      if (supabase) {
+        // בדיקה אם המזהה הוא UUID או קוד שחקן
+        const isUUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i.test(userIdentifier)
 
-          if (checkError) {
-            console.error("Error checking existing prediction:", checkError)
+        let userId = userIdentifier
+
+        // אם המזהה אינו UUID, נחפש את ה-UUID של המשתמש לפי קוד השחקן
+        if (!isUUID) {
+          console.log("Looking up user by playercode:", userIdentifier)
+
+          const { data: userData, error: userError } = await supabase
+            .from("users")
+            .select("id")
+            .eq("playercode", userIdentifier)
+            .limit(1)
+
+          if (userError) {
+            console.error("Error finding user by playercode:", userError)
+            alert("אירעה שגיאה בזיהוי המשתמש. נסה שוב.")
+            return
           }
 
-          if (existingPrediction && existingPrediction.length > 0) {
-            // עדכון ניחוש קיים
-            const { error: updateError } = await supabase
-              .from("predictions")
-              .update({ prediction })
-              .eq("id", existingPrediction[0].id)
+          if (!userData || userData.length === 0) {
+            console.error("No user found with playercode:", userIdentifier)
+            alert("לא נמצא משתמש עם קוד זה. אנא פנה למנהל המערכת.")
+            return
+          }
 
-            if (updateError) {
-              console.error("Error updating prediction:", updateError)
-              throw updateError
-            }
-          } else {
-            // יצירת ניחוש חדש
-            const { error: insertError } = await supabase.from("predictions").insert([
+          userId = userData[0].id
+          console.log("Found user ID:", userId)
+        }
+
+        // בדיקה אם הניחוש כבר קיים
+        const { data: existingPrediction, error: checkError } = await supabase
+          .from("predictions")
+          .select("*")
+          .eq("gameid", gameId)
+          .eq("userid", userId)
+
+        if (checkError) {
+          console.error("Error checking existing prediction:", checkError)
+          alert("אירעה שגיאה בבדיקת ניחושים קיימים. נסה שוב.")
+          return
+        }
+
+        // הוספת לוגים לדיבוג
+        console.log("Submitting prediction:", {
+          gameId,
+          userId,
+          prediction,
+          existingPrediction: existingPrediction?.length > 0 ? existingPrediction[0] : null,
+        })
+
+        if (existingPrediction && existingPrediction.length > 0) {
+          // עדכון ניחוש קיים
+          const { data: updateData, error: updateError } = await supabase
+            .from("predictions")
+            .update({
+              prediction,
+              timestamp: new Date().toISOString(),
+            })
+            .eq("id", existingPrediction[0].id)
+            .select()
+
+          if (updateError) {
+            console.error("Error updating prediction:", updateError)
+            alert("אירעה שגיאה בעדכון הניחוש. נסה שוב.")
+            return
+          }
+
+          console.log("Prediction updated successfully:", updateData)
+        } else {
+          // יצירת ניחוש חדש
+          const { data: insertData, error: insertError } = await supabase
+            .from("predictions")
+            .insert([
               {
                 gameid: gameId,
-                userid: userIdentifier,
+                userid: userId,
                 prediction,
                 timestamp: new Date().toISOString(),
               },
             ])
+            .select()
 
-            if (insertError) {
-              console.error("Error inserting prediction:", insertError)
-              throw insertError
-            }
+          if (insertError) {
+            console.error("Error inserting prediction:", insertError)
+            alert("אירעה שגיאה בשמירת הניחוש. נסה שוב.")
+            return
           }
 
-          // עדכון המצב המקומי
-          setSubmittedPredictions((prev) => ({
-            ...prev,
-            [gameId]: true,
-          }))
-
-          console.log("Prediction saved successfully")
+          console.log("Prediction inserted successfully:", insertData)
         }
-      } catch (supabaseError) {
-        console.error("Error saving prediction to Supabase:", supabaseError)
-        // אם יש שגיאה ב-Supabase, לפחות שמרנו בלוקל סטורג'
-        alert("הניחוש נשמר מקומית אך לא הצלחנו לשמור אותו בשרת. נסה שוב מאוחר יותר.")
+
+        // עדכון המצב המקומי
+        setSubmittedPredictions((prev) => ({
+          ...prev,
+          [gameId]: true,
+        }))
+
+        // הוספת הודעת הצלחה למשתמש
+        alert("הניחוש נשלח בהצלחה!")
       }
     } catch (error) {
       console.error("Error saving prediction:", error)
@@ -757,6 +560,11 @@ export default function Home() {
 
     // בדיקה אם המשחק כבר הסתיים
     if (game.isFinished) {
+      return true
+    }
+
+    // בדיקה אם המשחק מסומן כנעול
+    if (game.islocked) {
       return true
     }
 
@@ -803,15 +611,20 @@ export default function Home() {
           <h1 className="text-2xl font-bold">Fantasy Prediction</h1>
           <div className="flex items-center space-x-4">
             {isAuthenticated ? (
-              <>
+              <div className="flex items-center space-x-4">
                 <span className="text-sm">שלום, {userName || userIdentifier}</span>
+                {isAdmin && (
+                  <Link href="/admin" className="bg-blue-500 hover:bg-blue-600 text-white px-3 py-1 rounded text-sm">
+                    ממשק מנהל
+                  </Link>
+                )}
                 <button onClick={logout} className="bg-red-500 hover:bg-red-600 text-white px-3 py-1 rounded text-sm">
                   התנתק
                 </button>
-              </>
+              </div>
             ) : (
               <button
-                onClick={() => setShowLoginPage(true)}
+                onClick={() => router.push("/login")}
                 className="bg-blue-500 hover:bg-blue-600 text-white px-3 py-1 rounded text-sm"
               >
                 התחבר
@@ -942,32 +755,7 @@ export default function Home() {
                       </button>
                       {showPredictions[game.id] && (
                         <div className="mt-2 text-sm">
-                          {mockOtherPredictions[game.id] && mockOtherPredictions[game.id].length > 0 ? (
-                            <ul className="space-y-1">
-                              {mockOtherPredictions[game.id].map((pred, idx) => (
-                                <li key={idx} className="flex justify-between">
-                                  <span>{pred.playerName}</span>
-                                  <span
-                                    className={`font-medium ${
-                                      pred.prediction === "1"
-                                        ? "text-blue-500"
-                                        : pred.prediction === "X"
-                                          ? "text-green-500"
-                                          : "text-red-500"
-                                    }`}
-                                  >
-                                    {pred.prediction === "1"
-                                      ? `1 (${game.homeTeam})`
-                                      : pred.prediction === "X"
-                                        ? "X (תיקו)"
-                                        : `2 (${game.awayTeam})`}
-                                  </span>
-                                </li>
-                              ))}
-                            </ul>
-                          ) : (
-                            <p>אין ניחושים להצגה</p>
-                          )}
+                          <p>אין ניחושים להצגה</p>
                         </div>
                       )}
                     </div>

@@ -23,45 +23,46 @@ export default function AdminLeaderboardManagement() {
   const [error, setError] = useState<string | null>(null)
   const [success, setSuccess] = useState<string | null>(null)
 
+  // פונקציה לרענון טבלת הדירוג
+  const refreshLeaderboard = async () => {
+    setLoading(true)
+    setError(null)
+    try {
+      const supabase = getSupabaseClient()
+      if (!supabase) {
+        throw new Error("Supabase client is not available")
+      }
+
+      // טעינת משתמשים אמיתיים מ-Supabase
+      const { data, error } = await supabase.from("users").select("*").order("points", { ascending: false })
+
+      if (error) {
+        throw new Error(`Error fetching users: ${error.message}`)
+      }
+
+      // המרת הנתונים למבנה הנדרש
+      const formattedUsers = data.map((user) => ({
+        id: user.id,
+        name: user.name || "",
+        playercode: user.playercode || "",
+        points: user.points || 0,
+        status: (user.status as "active" | "blocked") || "active",
+        winner: false, // ברירת מחדל
+      }))
+
+      setUsers(formattedUsers)
+    } catch (error) {
+      console.error("Error fetching users:", error)
+      setError(error instanceof Error ? error.message : "שגיאה בטעינת המשתמשים")
+      setUsers([]) // מערך ריק במקרה של שגיאה
+    } finally {
+      setLoading(false)
+    }
+  }
+
   // עדכון useEffect לטעינת משתמשים אמיתיים מ-Supabase
   useEffect(() => {
-    const fetchUsers = async () => {
-      setLoading(true)
-      setError(null)
-      try {
-        const supabase = getSupabaseClient()
-        if (!supabase) {
-          throw new Error("Supabase client is not available")
-        }
-
-        // טעינת משתמשים אמיתיים מ-Supabase
-        const { data, error } = await supabase.from("users").select("*").order("points", { ascending: false })
-
-        if (error) {
-          throw new Error(`Error fetching users: ${error.message}`)
-        }
-
-        // המרת הנתונים למבנה הנדרש
-        const formattedUsers = data.map((user) => ({
-          id: user.id,
-          name: user.name || "",
-          playercode: user.playercode || "",
-          points: user.points || 0,
-          status: (user.status as "active" | "blocked") || "active",
-          winner: false, // ברירת מחדל
-        }))
-
-        setUsers(formattedUsers)
-      } catch (error) {
-        console.error("Error fetching users:", error)
-        setError(error instanceof Error ? error.message : "שגיאה בטעינת המשתמשים")
-        setUsers([]) // מערך ריק במקרה של שגיאה
-      } finally {
-        setLoading(false)
-      }
-    }
-
-    fetchUsers()
+    refreshLeaderboard()
   }, [])
 
   const handleEditStart = (user: AdminUser) => {
@@ -96,20 +97,9 @@ export default function AdminLeaderboardManagement() {
         throw new Error(`Error updating user points: ${error.message}`)
       }
 
-      // עדכון המשתמש ברשימה המקומית
-      const updatedUsers = users.map((user) => {
-        if (user.id === userId && editValues[userId]) {
-          return {
-            ...user,
-            points: editValues[userId].points,
-          }
-        }
-        return user
-      })
+      // רענון הטבלה לאחר העדכון
+      await refreshLeaderboard()
 
-      // מיון מחדש לפי נקודות
-      updatedUsers.sort((a, b) => b.points - a.points)
-      setUsers(updatedUsers)
       setEditingUser(null)
       setSuccess("הנקודות עודכנו בהצלחה")
 
@@ -156,12 +146,9 @@ export default function AdminLeaderboardManagement() {
           throw new Error(`Error resetting leaderboard: ${error.message}`)
         }
 
-        // איפוס הנקודות ברשימה המקומית
-        const resetUsers = users.map((user) => ({
-          ...user,
-          points: 0,
-        }))
-        setUsers(resetUsers)
+        // רענון הטבלה לאחר האיפוס
+        await refreshLeaderboard()
+
         setSuccess("טבלת הדירוג אופסה בהצלחה")
 
         // מחיקת ההודעה אחרי 3 שניות
@@ -175,11 +162,27 @@ export default function AdminLeaderboardManagement() {
     }
   }
 
+  // הוספת מנגנון רענון אוטומטי כל 30 שניות
+  useEffect(() => {
+    const intervalId = setInterval(() => {
+      refreshLeaderboard()
+    }, 30000) // 30 seconds
+
+    return () => clearInterval(intervalId)
+  }, [])
+
   return (
     <div>
       <div className="flex justify-between items-center mb-6">
         <h3 className="text-xl font-bold">ניהול טבלת דירוג</h3>
         <div className="flex space-x-2 rtl:space-x-reverse">
+          <button
+            className="px-4 py-2 bg-green-600 text-white rounded-md hover:bg-green-700 flex items-center"
+            onClick={refreshLeaderboard}
+          >
+            <RefreshCw className="w-4 h-4 ml-2" />
+            רענן טבלה
+          </button>
           <button
             className="px-4 py-2 bg-navy-600 text-white rounded-md hover:bg-navy-700 flex items-center"
             onClick={() => setEditMode(!editMode)}

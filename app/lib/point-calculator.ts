@@ -13,8 +13,8 @@ export function calculatePoints(prediction: string, result: string, isSaturdayGa
     return 0
   }
 
-  // נקודות בסיסיות לניחוש נכון - שינוי ל-1 נקודה
-  const basePoints = 1
+  // נקודות בסיסיות לניחוש נכון - שינוי ל-3 נקודות
+  const basePoints = 3
 
   // בדיקה אם זה משחק שבת (X2)
   const multiplier = isSaturdayGame ? 2 : 1
@@ -52,7 +52,7 @@ export function testSaturdayBonus(
 } {
   const isCorrect = prediction === result
   const isSaturday = isSaturdayGame(gameDate)
-  const basePoints = isCorrect ? 1 : 0 // שינוי ל-1 נקודה
+  const basePoints = isCorrect ? 3 : 0 // שינוי ל-3 נקודות
   const totalPoints = calculatePoints(prediction, result, isSaturday)
 
   let explanation = ""
